@@ -17,7 +17,8 @@ app = FastAPI()
 async def add_name(data : dict):
     cursor = db.cursor()
     cursor.execute(
-        'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', (data['source']), data['event_type'], json.dumps(data['payload'])
+        'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
+        (data['source'], data['event_type'], json.dumps(data['payload']))
         )
     db.commit()
     cursor.close()
@@ -25,22 +26,4 @@ async def add_name(data : dict):
 
 
 
-@app.get("/")
-async def read_root():
-    return {"Hello":"World"}
-
-
-
-nameList = {"first":'james', 
-            "second":'john',
-            "third": 'doe'}
-
-@app.get("/test")
-async def test():
-    return nameList
-
-
-@app.get("/items/{item_id}")
-async def read_item(item_id: int, q: str | None = None):
-    return {"item_id": item_id, "q": q}
 
