@@ -1,5 +1,12 @@
 from fastapi import FastAPI
+import psycopg2
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+db = psycopg2.connect(DATABASE_URL)
 app = FastAPI()
 
 
