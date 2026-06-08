@@ -6,8 +6,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-db = psycopg2.connect(DATABASE_URL)
+db = psycopg2.connect(DATABASE_URL, sslmode ='require')
 app = FastAPI()
+
+
+
+@app.post("/test/try/add")
+async def add_name(data : dict):
+    cursor = db.cursor()
+
+    cursor.execute()
+    return nameList
 
 
 @app.get("/")
@@ -23,13 +32,6 @@ nameList = {"first":'james',
 @app.get("/test")
 async def test():
     return nameList
-
-@app.post("/test/try/add")
-async def add_name(data : dict):
-    nameList.update(data)
-    return nameList
-
-
 
 
 @app.get("/items/{item_id}")
