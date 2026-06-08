@@ -13,8 +13,6 @@ app = FastAPI()
 
 
 
-
-
 @app.post("/test/try/add")
 async def add_name(data : dict):
     cursor = db.cursor()
