@@ -4,11 +4,14 @@ import os
 from dotenv import load_dotenv
 import json
 
+
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 db = psycopg2.connect(DATABASE_URL, sslmode ='require')
 app = FastAPI()
+
+
 
 
 
