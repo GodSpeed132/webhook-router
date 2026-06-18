@@ -28,7 +28,7 @@ class WebhookEvent(BaseModel):
 
 
 @app.post("/webhook/github")
-async def add_name(data: WebhookEvent):
+async def github_webhook(data: WebhookEvent):
     cursor = db.cursor()
     cursor.execute(
         'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
