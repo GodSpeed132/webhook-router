@@ -27,7 +27,7 @@ class WebhookEvent(BaseModel):
 
 
 
-@app.post("/test/try/add")
+@app.post("/webhook/github")
 async def add_name(data: WebhookEvent):
     cursor = db.cursor()
     cursor.execute(
