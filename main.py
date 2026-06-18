@@ -51,6 +51,7 @@ async def github(request: Request):
         )
     db.commit()
     db.close()
+    return {'status': 'recived'}
 
 
 
