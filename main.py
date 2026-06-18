@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from enum import Enum
 import psycopg2
@@ -27,8 +27,8 @@ class WebhookEvent(BaseModel):
 
 
 
-@app.post("/webhook/github")
-async def github_webhook(data: WebhookEvent):
+@app.post("/test/try/add")
+async def test(data: WebhookEvent):
     cursor = db.cursor()
     cursor.execute(
         'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
@@ -37,6 +37,22 @@ async def github_webhook(data: WebhookEvent):
     db.commit()
     cursor.close()
     return {"status": "received"}
+
+
+
+@app.post("/webhook/github")
+async def github(request: Request):
+    payload = await request.json()
+    print(payload)
+    cursor = db.cursor()
+    cursor.execute(
+        'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
+        ('github', 'post', json.dumps(payload))
+        )
+    db.commit()
+    db.close()
+
+
 
 
 
