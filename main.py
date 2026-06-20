@@ -50,8 +50,9 @@ async def github(request: Request):
         ('github', 'post', json.dumps(payload))
         )
     db.commit()
-    db.close()
+    cursor.close()
     return {'status': 'recived'}
+
 
 
 
