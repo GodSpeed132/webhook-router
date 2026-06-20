@@ -43,7 +43,7 @@ async def test(data: WebhookEvent):
 @app.post("/webhook/github")
 async def github(request: Request):
     payload = await request.json()
-    print(payload)
+    print(request.headers)
     cursor = db.cursor()
     cursor.execute(
         'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
