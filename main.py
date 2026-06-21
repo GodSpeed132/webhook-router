@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from enum import Enum
 import psycopg2
@@ -23,20 +23,26 @@ async def github(request: Request):
     current_event = request.headers.get('x-github-event')
     print(request.headers)
 
+    header = request.headers.get('x-hub-signature-256')
     body = await request.body()
     known_secret = b'jamestesting'
-    signature = hmac.new(known_secret, body, hashlib.sha256).hexdigest()
+    my_signature = hmac.new(known_secret, body, hashlib.sha256).hexdigest()
+    git_signature = header.removeprefix("sha256=")
 
 
-    cursor = db.cursor()
-    cursor.execute(
-        'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
-        ('github', current_event, json.dumps(payload))
-        )
-    db.commit()
-    cursor.close()
+    if hmac.compare_digest(my_signature, git_signature):
+        cursor = db.cursor()
+        cursor.execute(
+            'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
+            ('github', current_event, json.dumps(payload))
+            )
+        db.commit()
+        cursor.close()
 
-    return {'status': 'recived'}
+        return {'status': 'recived'}
+    else:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+        
 
 
 
