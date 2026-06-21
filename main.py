@@ -24,7 +24,7 @@ async def github(request: Request):
     print(request.headers)
 
     body = await request.body()
-    known_secret = 'iamhersandsheismine'
+    known_secret = b'jamestesting'
     signature = hmac.new(known_secret, body, hashlib.sha256).hexdigest()
 
 
