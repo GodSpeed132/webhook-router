@@ -5,6 +5,8 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 import json
+import hmac
+import hashlib
 
 
 load_dotenv()
@@ -16,9 +18,16 @@ app = FastAPI()
 
 @app.post("/webhook/github")
 async def github(request: Request):
+
     payload = await request.json()
     current_event = request.headers.get('x-github-event')
     print(request.headers)
+
+    body = await request.body()
+    known_secret = 'iamhersandsheismine'
+    signature = hmac.new(known_secret, body, hashlib.sha256).hexdigest()
+
+
     cursor = db.cursor()
     cursor.execute(
         'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
@@ -26,6 +35,7 @@ async def github(request: Request):
         )
     db.commit()
     cursor.close()
+
     return {'status': 'recived'}
 
 
