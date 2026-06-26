@@ -42,6 +42,18 @@ async def github(request: Request):
         return {'status': 'recived'}
     else:
         raise HTTPException(status_code=401, detail='Unauthorized')
+    
+
+
+class model(BaseModel):
+    temp =[]
+
+
+@app.post("/create_rules/slack")
+async def create_rules(shape: model):
+    cursor = db.cursor()
+    cursor.execute('')
+
         
 
 
