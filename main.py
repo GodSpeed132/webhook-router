@@ -39,21 +39,39 @@ async def github(request: Request):
         db.commit()
         cursor.close()
 
-        return {'status': 'recived'}
+        return {'status': 'recieved'}
     else:
         raise HTTPException(status_code=401, detail='Unauthorized')
     
 
 
-class model(BaseModel):
-    temp =[]
+
+
+class EventType(str, Enum):
+    push = 'push'
+    pull_request = 'pull_request'
+    issues = 'issues'
+    star = 'star'
+
+
+class RoutingRules(BaseModel):
+    source: str
+    event_type: EventType
+    destination_type: str
+    destination_config: dict
 
 
 @app.post("/create_rules/slack")
-async def create_rules(shape: model):
+async def create_rules(model: RoutingRules):
     cursor = db.cursor()
-    cursor.execute('')
-
+    cursor.execute(
+        'INSERT INTO routing_rules (source, event_type, destination_type, destination_config) VALUES (%s, %s, %s, %s)', 
+        (model.source, model.event_type.value, model.destination_type, json.dumps(model.destination_config))
+        )
+    db.commit()
+    cursor.close()
+    
+    return {'status': 'posted'}
         
 
 
