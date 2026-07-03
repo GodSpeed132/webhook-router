@@ -70,13 +70,29 @@ async def create_rules(model: RoutingRules):
         )
     db.commit()
     cursor.close()
-    
+
     return {'status': 'posted'}
         
 
 
+@app.get("/get_rules")
+async def get_rules(source: str | None = None, event_type: str | None = None):
+    cursor = db.cursor()
+    if source and event_type:
+        cursor.execute(
+            'SELECT * FROM routing_rules WHERE source=%s AND event_type=%s',
+            (source, event_type)
+            )
 
+        rows = cursor.fetchall()
+    else:
+        cursor.execute('SELECT * FROM routing_rules')
+        rows = cursor.fetchall()
+    
 
-
-
-
+    result = [
+        {"id": row[0], "source": row[1], "event_type": row[2], "destination_type": row[3], "destination_config": row[4]}
+        for row in rows
+        ]
+    cursor.close()
+    return result
