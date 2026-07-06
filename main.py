@@ -47,24 +47,27 @@ async def github(request: Request):
         url = cursor.fetchall()
         cursor.close()
 
-        if len(payload['commits']) > 0:
-            commit_message = payload['commits'][0]['message']
-            timestamp = payload['commits'][0]['timestamp']
-            author = payload['commits'][0]['author']['username']
+        if url:
+            if len(payload['commits']) > 0:
+                commit_message = payload['commits'][0]['message']
+                timestamp = payload['commits'][0]['timestamp']
+                author = payload['commits'][0]['author']['username']
+            else:
+                commit_message, timestamp, author = None, None, None
+
+            format_message = (
+                f"New event from: Github\n"
+                f"Event: {current_event}\n"
+                f"Author: {author}\n"
+                f"Commit message: {commit_message}\n"
+                f"Timestamp: {timestamp}"
+            )
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url[0][0]['webhook_url'], json={"text":format_message})
+                print(response.status_code)
         else:
-            commit_message, timestamp, author = None, None, None
-
-        format_message = (
-            f"New event from: Github\n"
-            f"Event: {current_event}\n"
-            f"Author: {author}\n"
-            f"Commit message: {commit_message}\n"
-            f"Timestamp: {timestamp}"
-        )
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url[0][0]['webhook_url'], json=json.dumps(format_message))
-            print(response.status_code)
+            return {'status': 'received'} 
 
 
 
