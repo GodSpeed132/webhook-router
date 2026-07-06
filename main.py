@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import json
 import hmac
 import hashlib
+import httpx
 
 
 load_dotenv()
@@ -37,7 +38,35 @@ async def github(request: Request):
             ('github', current_event, json.dumps(payload))
             )
         db.commit()
+
+
+
+        cursor.execute(
+            'SELECT destination_config FROM routing_rules WHERE source=%s AND event_type=%s', 
+            ('github', current_event))
+        url = cursor.fetchall()
         cursor.close()
+
+        if len(payload['commits']) > 0:
+            commit_message = payload['commits'][0]['message']
+            timestamp = payload['commits'][0]['timestamp']
+            author = payload['commits'][0]['author']['username']
+        else:
+            commit_message, timestamp, author = None, None, None
+
+        format_message = (
+            f"New event from: Github\n"
+            f"Event: {current_event}\n"
+            f"Author: {author}\n"
+            f"Commit message: {commit_message}\n"
+            f"Timestamp: {timestamp}"
+        )
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url[0][0]['webhook_url'], json=json.dumps(format_message))
+            print(response.status_code)
+
+
 
         return {'status': 'recieved'}
     else:
@@ -83,13 +112,12 @@ async def get_rules(source: str | None = None, event_type: str | None = None):
             'SELECT * FROM routing_rules WHERE source=%s AND event_type=%s',
             (source, event_type)
             )
-
-        rows = cursor.fetchall()
     else:
         cursor.execute('SELECT * FROM routing_rules')
-        rows = cursor.fetchall()
-    
 
+    
+    rows = cursor.fetchall()
+    
     result = [
         {"id": row[0], "source": row[1], "event_type": row[2], "destination_type": row[3], "destination_config": row[4]}
         for row in rows
