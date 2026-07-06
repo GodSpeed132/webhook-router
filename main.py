@@ -40,20 +40,22 @@ async def github(request: Request):
         db.commit()
 
 
-
         cursor.execute(
             'SELECT destination_config FROM routing_rules WHERE source=%s AND event_type=%s', 
             ('github', current_event))
         url = cursor.fetchall()
         cursor.close()
+        
 
         if url:
+
+            commit_message, timestamp, author = None, None, None
+
             if len(payload['commits']) > 0:
                 commit_message = payload['commits'][0]['message']
                 timestamp = payload['commits'][0]['timestamp']
                 author = payload['commits'][0]['author']['username']
-            else:
-                commit_message, timestamp, author = None, None, None
+            
 
             format_message = (
                 f"New event from: Github\n"
