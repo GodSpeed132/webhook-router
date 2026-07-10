@@ -22,7 +22,7 @@ async def github(request: Request):
 
     payload = await request.json()
     current_event = request.headers.get('x-github-event')
-    print(request.headers)
+    #print(request.headers)
 
     header = request.headers.get('x-hub-signature-256')
     body = await request.body()
@@ -73,6 +73,7 @@ async def github(request: Request):
                     print(response.status_code)
 
             except Exception as e:
+                print(e)
                 retry_count = 0
                 next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=2**retry_count)
 
