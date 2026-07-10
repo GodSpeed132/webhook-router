@@ -8,7 +8,7 @@ import json
 import hmac
 import hashlib
 import httpx
-
+from datetime import datetime, timedelta, timezone
 
 load_dotenv()
 
@@ -34,9 +34,11 @@ async def github(request: Request):
     if hmac.compare_digest(my_signature, git_signature):
         cursor = db.cursor()
         cursor.execute(
-            'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s)', 
+            'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s) RETURNING id', 
             ('github', current_event, json.dumps(payload))
             )
+        result = cursor.fetchone()
+        new_id = result[0]
         db.commit()
 
 
@@ -44,12 +46,12 @@ async def github(request: Request):
             'SELECT destination_config FROM routing_rules WHERE source=%s AND event_type=%s', 
             ('github', current_event))
         url = cursor.fetchall()
-        cursor.close()
-        
+
 
         if url:
 
             commit_message, timestamp, author = None, None, None
+            destination = url[0][0]['webhook_url']
 
             if len(payload['commits']) > 0:
                 commit_message = payload['commits'][0]['message']
@@ -65,9 +67,20 @@ async def github(request: Request):
                 f"Timestamp: {timestamp}"
             )
 
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url[0][0]['webhook_url'], json={"text":format_message})
-                print(response.status_code)
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(destination, json={"text":format_message})
+                    print(response.status_code)
+
+            except Exception as e:
+                retry_count = 0
+                next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=2**retry_count)
+
+                cursor.execute('INSERT INTO failed_deliveries (event_id, destination, error_message, retry_count, next_retry_at) VALUES (%s, %s, %s, %s, %s)',
+                               (new_id, destination, str(e), retry_count, next_retry_at))
+                db.commit()
+
+            cursor.close()
         else:
             return {'status': 'received'} 
 
@@ -95,7 +108,7 @@ class RoutingRules(BaseModel):
     destination_config: dict
 
 
-@app.post("/create_rules/slack")
+@app.post("/create_rules")
 async def create_rules(model: RoutingRules):
     cursor = db.cursor()
     cursor.execute(
