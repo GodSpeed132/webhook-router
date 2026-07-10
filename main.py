@@ -70,6 +70,7 @@ async def github(request: Request):
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(destination, json={"text":format_message})
+                    response.raise_for_status()
                     print(response.status_code)
 
             except Exception as e:
