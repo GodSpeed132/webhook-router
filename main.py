@@ -9,17 +9,54 @@ import hmac
 import hashlib
 import httpx
 from datetime import datetime, timedelta, timezone
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 
 load_dotenv()
-
 DATABASE_URL = os.getenv("DATABASE_URL")
 db = psycopg2.connect(DATABASE_URL, sslmode ='require')
+
+
+async def retry_request():
+    cursor = db.cursor()
+    cursor.execute(
+        'SELECT * FROM failed_deliveries WHERE next_retry_at<=%s AND retry_count < 3', 
+        (datetime.now(timezone.utc), )
+        )
+    failed_request = cursor.fetchall()
+    
+    for row in failed_request:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(row[2], json={"text": row[6]})
+                response.raise_for_status()
+                cursor.execute('DELETE FROM failed_deliveries where id=%s', (row[0],))
+                db.commit()
+
+        except:
+            failed_retry_count = row[4]
+            failed_next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=2**failed_retry_count)
+            cursor.execute('UPDATE failed_deliveries set retry_count=%s, next_retry_at=%s WHERE id=%s', 
+                           (failed_retry_count + 1, failed_next_retry_at, row[0]))
+            db.commit()
+    cursor.close()
+
+
+
+scheduler = AsyncIOScheduler()
+scheduler.add_job()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    temp=None
+
+
 app = FastAPI()
 
 
 @app.post("/webhook/github")
 async def github(request: Request):
-
     payload = await request.json()
     current_event = request.headers.get('x-github-event')
     #print(request.headers)
@@ -29,7 +66,6 @@ async def github(request: Request):
     known_secret = b'jamestesting'
     my_signature = hmac.new(known_secret, body, hashlib.sha256).hexdigest()
     git_signature = header.removeprefix("sha256=")
-
 
     if hmac.compare_digest(my_signature, git_signature):
         cursor = db.cursor()
@@ -41,15 +77,12 @@ async def github(request: Request):
         new_id = result[0]
         db.commit()
 
-
         cursor.execute(
             'SELECT destination_config FROM routing_rules WHERE source=%s AND event_type=%s', 
             ('github', current_event))
         url = cursor.fetchall()
 
-
         if url:
-
             commit_message, timestamp, author = None, None, None
             destination = url[0][0]['webhook_url']
 
@@ -57,7 +90,6 @@ async def github(request: Request):
                 commit_message = payload['commits'][0]['message']
                 timestamp = payload['commits'][0]['timestamp']
                 author = payload['commits'][0]['author']['username']
-            
 
             format_message = (
                 f"New event from: Github\n"
@@ -74,29 +106,29 @@ async def github(request: Request):
                     print(response.status_code)
 
             except Exception as e:
+
                 print(e)
                 retry_count = 0
-                next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=2**retry_count)
+                next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=1)
 
-                cursor.execute('INSERT INTO failed_deliveries (event_id, destination, error_message, retry_count, next_retry_at) VALUES (%s, %s, %s, %s, %s)',
-                               (new_id, destination, str(e), retry_count, next_retry_at))
+                cursor.execute('INSERT INTO failed_deliveries (event_id, destination, error_message, retry_count, next_retry_at, formatted_message) VALUES (%s, %s, %s, %s, %s, %s)',
+                               (new_id, destination, str(e), retry_count, next_retry_at, format_message))
                 db.commit()
 
             cursor.close()
+
         else:
+            cursor.close()
             return {'status': 'received'} 
-
-
-
+        
         return {'status': 'recieved'}
+    
     else:
         raise HTTPException(status_code=401, detail='Unauthorized')
     
 
-
-
-
 class EventType(str, Enum):
+
     push = 'push'
     pull_request = 'pull_request'
     issues = 'issues'
@@ -104,6 +136,7 @@ class EventType(str, Enum):
 
 
 class RoutingRules(BaseModel):
+
     source: str
     event_type: EventType
     destination_type: str
@@ -121,7 +154,6 @@ async def create_rules(model: RoutingRules):
     cursor.close()
 
     return {'status': 'posted'}
-        
 
 
 @app.get("/get_rules")
@@ -135,7 +167,6 @@ async def get_rules(source: str | None = None, event_type: str | None = None):
     else:
         cursor.execute('SELECT * FROM routing_rules')
 
-    
     rows = cursor.fetchall()
     
     result = [
