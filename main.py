@@ -45,14 +45,16 @@ async def retry_request():
 
 
 scheduler = AsyncIOScheduler()
-scheduler.add_job()
+scheduler.add_job(retry_request, 'interval', minutes=1, max_instances=1)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    temp=None
+    scheduler.start()
+    yield
+    scheduler.shutdown()
 
 
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 
 @app.post("/webhook/github")
