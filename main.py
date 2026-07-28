@@ -82,14 +82,14 @@ async def github(request: Request):
                 'github', current_event, json.dumps(payload)
                 )
             
-            url = json.loads( await conn.fetchrow(
+            url = await conn.fetchrow(
                 'SELECT destination_config FROM routing_rules WHERE source=$1 AND event_type=$2', 
                 'github', current_event)
-            )
 
         if url:
             commit_message, timestamp, author = None, None, None
-            destination = url['destination_config']['webhook_url']
+            destination_config = json.loads(url['destination_config'])
+            destination = destination_config['webhook_url']
             commits = payload.get("commits", [])
 
             if commits:
