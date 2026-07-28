@@ -82,9 +82,10 @@ async def github(request: Request):
                 'github', current_event, json.dumps(payload)
                 )
             
-            url = await conn.fetchrow(
+            url = json.loads( await conn.fetchrow(
                 'SELECT destination_config FROM routing_rules WHERE source=$1 AND event_type=$2', 
                 'github', current_event)
+            )
 
         if url:
             commit_message, timestamp, author = None, None, None
