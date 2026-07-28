@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from enum import Enum
-import psycopg2
+import asyncpg
 import os
 from dotenv import load_dotenv
 import json
@@ -15,42 +15,47 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
-db = psycopg2.connect(DATABASE_URL, sslmode ='require')
 
 
-async def retry_request():
-    cursor = db.cursor()
-    cursor.execute(
-        'SELECT * FROM failed_deliveries WHERE next_retry_at<=%s AND retry_count < 3', 
-        (datetime.now(timezone.utc), )
-        )
-    failed_request = cursor.fetchall()
-    
-    for row in failed_request:
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(row[2], json={"text": row[6]})
-                response.raise_for_status()
-                cursor.execute('DELETE FROM failed_deliveries where id=%s', (row[0],))
-                db.commit()
 
-        except:
-            failed_retry_count = row[4]
-            failed_next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=2**failed_retry_count)
-            cursor.execute('UPDATE failed_deliveries set retry_count=%s, next_retry_at=%s WHERE id=%s', 
-                           (failed_retry_count + 1, failed_next_retry_at, row[0]))
-            db.commit()
-    cursor.close()
+async def retry_request(app: FastAPI):
+    async with app.state.pool.acquire() as conn:
+        failed_requests = await conn.fetch(
+            'SELECT * FROM failed_deliveries WHERE next_retry_at<=$1 AND retry_count < 3', 
+            datetime.now(timezone.utc)
+            )
 
+        for row in failed_requests:
+            async with conn.transaction():
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(row['destination'], json={"text": row['formatted_message']})
+                        response.raise_for_status()
+                        await conn.execute('DELETE FROM failed_deliveries where id=$1', row['id'])
+
+                except Exception as e:
+                    print(e)
+                    failed_retry_count = row['retry_count']
+                    failed_next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=2**failed_retry_count)
+                    await conn.execute('UPDATE failed_deliveries set retry_count=$1, next_retry_at=$2 WHERE id=$3', 
+                                    failed_retry_count + 1, failed_next_retry_at, row['id'])
 
 
 scheduler = AsyncIOScheduler()
-scheduler.add_job(retry_request, 'interval', minutes=1, max_instances=1)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    
+    
+    app.state.pool = await asyncpg.create_pool(DATABASE_URL)
+
+    scheduler.add_job(retry_request, "interval", minutes=1, max_instances=1, kwargs={"app":app})
+
     scheduler.start()
+
     yield
+    await app.state.pool.close()
     scheduler.shutdown()
 
 
@@ -70,28 +75,27 @@ async def github(request: Request):
     git_signature = header.removeprefix("sha256=")
 
     if hmac.compare_digest(my_signature, git_signature):
-        cursor = db.cursor()
-        cursor.execute(
-            'INSERT INTO events (source, event_type, payload) VALUES (%s, %s, %s) RETURNING id', 
-            ('github', current_event, json.dumps(payload))
-            )
-        result = cursor.fetchone()
-        new_id = result[0]
-        db.commit()
 
-        cursor.execute(
-            'SELECT destination_config FROM routing_rules WHERE source=%s AND event_type=%s', 
-            ('github', current_event))
-        url = cursor.fetchall()
+        async with request.app.state.pool.acquire() as conn:
+            new_id = await conn.fetchval(
+                'INSERT INTO events (source, event_type, payload) VALUES ($1, $2, $3) RETURNING id', 
+                'github', current_event, json.dumps(payload)
+                )
+            
+            url = await conn.fetchrow(
+                'SELECT destination_config FROM routing_rules WHERE source=$1 AND event_type=$2', 
+                'github', current_event)
 
         if url:
             commit_message, timestamp, author = None, None, None
-            destination = url[0][0]['webhook_url']
+            destination = url['destination_config']['webhook_url']
+            commits = payload.get("commits", [])
 
-            if len(payload['commits']) > 0:
-                commit_message = payload['commits'][0]['message']
-                timestamp = payload['commits'][0]['timestamp']
-                author = payload['commits'][0]['author']['username']
+            if commits:
+                commit = commits[0]
+                commit_message = commit['message']
+                timestamp = commit['timestamp']
+                author = commit['author']['username']
 
             format_message = (
                 f"New event from: Github\n"
@@ -108,23 +112,19 @@ async def github(request: Request):
                     print(response.status_code)
 
             except Exception as e:
-
                 print(e)
                 retry_count = 0
                 next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=1)
 
-                cursor.execute('INSERT INTO failed_deliveries (event_id, destination, error_message, retry_count, next_retry_at, formatted_message) VALUES (%s, %s, %s, %s, %s, %s)',
-                               (new_id, destination, str(e), retry_count, next_retry_at, format_message))
-                db.commit()
-
-            cursor.close()
+                async with request.app.state.pool.acquire() as conn:
+                    await conn.execute('INSERT INTO failed_deliveries (event_id, destination, error_message, retry_count, next_retry_at, formatted_message) VALUES ($1, $2, $3, $4, $5, $6)',
+                                    new_id, destination, str(e), retry_count, next_retry_at, format_message)
 
         else:
-            cursor.close()
             return {'status': 'received'} 
+            
+        return {'status': 'received'}
         
-        return {'status': 'recieved'}
-    
     else:
         raise HTTPException(status_code=401, detail='Unauthorized')
     
@@ -146,34 +146,29 @@ class RoutingRules(BaseModel):
 
 
 @app.post("/create_rules")
-async def create_rules(model: RoutingRules):
-    cursor = db.cursor()
-    cursor.execute(
-        'INSERT INTO routing_rules (source, event_type, destination_type, destination_config) VALUES (%s, %s, %s, %s)', 
-        (model.source, model.event_type.value, model.destination_type, json.dumps(model.destination_config))
-        )
-    db.commit()
-    cursor.close()
-
+async def create_rules(request: Request, model: RoutingRules):
+    async with request.app.state.pool.acquire() as conn:
+        await conn.execute(
+            'INSERT INTO routing_rules (source, event_type, destination_type, destination_config) VALUES ($1, $2, $3, $4)', 
+            model.source, model.event_type.value, model.destination_type, json.dumps(model.destination_config))
+            
     return {'status': 'posted'}
 
 
 @app.get("/get_rules")
-async def get_rules(source: str | None = None, event_type: str | None = None):
-    cursor = db.cursor()
-    if source and event_type:
-        cursor.execute(
-            'SELECT * FROM routing_rules WHERE source=%s AND event_type=%s',
-            (source, event_type)
-            )
-    else:
-        cursor.execute('SELECT * FROM routing_rules')
+async def get_rules(request: Request, source: str | None = None, event_type: str | None = None):
 
-    rows = cursor.fetchall()
+    async with request.app.state.pool.acquire() as conn:
+        if source and event_type:
+            rows = await conn.fetch(
+                'SELECT * FROM routing_rules WHERE source=$1 AND event_type=$2',
+                source, event_type
+                )
+        else:
+            rows = await conn.fetch('SELECT * FROM routing_rules')
     
     result = [
         {"id": row[0], "source": row[1], "event_type": row[2], "destination_type": row[3], "destination_config": row[4]}
         for row in rows
         ]
-    cursor.close()
     return result
